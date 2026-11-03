@@ -120,7 +120,11 @@ sealed class LspConfig {
 
   /// Sends a response to a request from the LSP server.
   /// This is used to reply to server-initiated requests.
-  Future<Map<String, dynamic>> sendResponse(int id, List<dynamic> result);
+  ///
+  /// [id] is echoed back verbatim: JSON-RPC allows both integer and string
+  /// request ids (the TypeScript 7 native LSP server, for example, uses ids
+  /// such as `"ts1"`), so this must not be narrowed to [int].
+  Future<Map<String, dynamic>> sendResponse(Object id, List<dynamic> result);
 
   /// Whether this server should always use full-document didChange sync.
   /// ccls is handled in this mode for semantic highlight compatibility.
