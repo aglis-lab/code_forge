@@ -106,7 +106,7 @@ class CodeForgeController implements DeltaTextInputClient {
   ({String filePath, String prefix, int line, int character})?
   _queuedCompletionRequest;
 
-  CodeForgeController({this.lspConfig}) {
+  CodeForgeController({this.lspConfig, this.completeFunctionCalls = false}) {
     if (lspConfig != null) {
       (() async {
         try {
@@ -597,6 +597,12 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Enables advanced features like hover documentation, diagnostics,
   /// and semantic highlighting.
   LspConfig? lspConfig;
+
+  /// Whether accepting a method, function or constructor completion from the
+  /// language server also writes `()` and puts the caret between them, as editors
+  /// like VS Code do. Off by default, because a server can report things that are
+  /// not called with parentheses (Robot Framework keywords, for one) as functions.
+  final bool completeFunctionCalls;
 
   /// Open a file using the controller API instead of passing `filePath` parameter to [CodeForge].<br>
   set openFile(String? file) {
@@ -1200,11 +1206,44 @@ class CodeForgeController implements DeltaTextInputClient {
     final insertText = _extractSuggestionText(selected);
 
     if (insertText.isNotEmpty) {
-      insertAtCurrentCursor(insertText, replaceTypedChar: true);
+      final call = _shouldCompleteCall(selected, insertText);
+      insertAtCurrentCursor(
+        call ? '$insertText()' : insertText,
+        replaceTypedChar: true,
+      );
+      if (call) {
+        // Between the parentheses, where the arguments go. Typing `)` there
+        // steps over the closing one, so a function without arguments is fine.
+        setSelectionSilently(
+          TextSelection.collapsed(offset: selection.extentOffset - 1),
+        );
+      }
     }
 
     suggestionsNotifier.value = null;
     currentlySelectedSuggestion = 0;
+  }
+
+  /// Whether accepting [suggestion] should also write `()` after [insertText].
+  ///
+  /// Only for a method, function or constructor from the language server, and not
+  /// when a call is already there: the label has parentheses, or the caret sits
+  /// right before one, as when editing the name of an existing call.
+  bool _shouldCompleteCall(dynamic suggestion, String insertText) {
+    if (!completeFunctionCalls || suggestion is! LspCompletion) return false;
+    const callable = {
+      CompletionItemType.method,
+      CompletionItemType.function,
+      CompletionItemType.constructor,
+    };
+    if (!callable.contains(suggestion.itemType)) return false;
+    if (insertText.contains('(')) return false;
+
+    final at = selection.extentOffset.clamp(0, length);
+    final line = getLineAtOffset(at);
+    final column = at - getLineStartOffset(line);
+    final lineText = getLineText(line);
+    return !(column < lineText.length && lineText[column] == '(');
   }
 
   String _extractSuggestionText(dynamic suggestion) {
